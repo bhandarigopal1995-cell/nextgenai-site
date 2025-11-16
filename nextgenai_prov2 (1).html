@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NextGen AI — Pro Text→Video Generator v2</title>
+  <style>
+    :root{--bg:#0b0b0b;--muted:#bdbdbd;--accent:#ffd400;--btn:#00b894}
+    body{font-family:Inter,system-ui,Arial; background:var(--bg); color:#fff; margin:12px;padding:16px}
+    .card{background:#0f0f0f;border:1px solid #1a1a1a;padding:14px;border-radius:10px;margin-bottom:12px}
+    label{font-size:13px;color:var(--muted)}
+    textarea{width:100%;height:120px;padding:10px;border-radius:6px;border:1px solid #222;background:#060606;color:#fff}
+    select,input[type=text]{width:100%;padding:8px;border-radius:6px;border:1px solid #222;background:#060606;color:#fff}
+    button{background:var(--accent);border:none;padding:10px 12px;border-radius:8px;font-weight:700;cursor:pointer}
+    .row{display:flex;gap:10px}
+    .half{flex:1}
+    .inline{display:inline-block}
+    .small{font-size:12px;color:var(--muted)}
+    .templates{display:flex;gap:8px;margin-top:8px}
+    .temp{padding:8px 10px;border-radius:8px;background:#111;cursor:pointer;border:1px solid #222}
+    .temp.active{border-color:var(--accent);box-shadow:0 6px 20px rgba(255,212,0,0.06)}
+    canvas{background:#000;border-radius:8px;border:2px solid #151515}
+    video{width:100%;max-height:360px;background:#000}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .muted{opacity:.7}
+  </style>
+</head>
+<body>
+  <h2 style="margin:0 0 8px;color:var(--accent)">NextGen AI — Pro Text → Video Generator v2</h2>
+  <div class="card">
+    <div class="small">Paste your HINDI script (or any language). Choose template, voice & automation options. This pro version includes:</div>
+    <ul class="small muted">
+      <li>4 visual templates (Dark/Neon/Minimal/Tech)</li>
+      <li>Auto B-Roll fetch from Pexels (optional API key)</li>
+      <li>High-quality TTS via ElevenLabs (optional API key) or browser TTS fallback</li>
+      <li>Auto emojis, auto outro, subtitles, sound effects</li>
+      <li>WebM recording + optional in-browser conversion to MP4 using ffmpeg.wasm</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <label>1) Script</label>
+    <textarea id="script">Ek AI tool bataun jo ek long video ko 10 viral reels me convert kar deta hai? Bina editing ki tension ke! Is AI tool ka naam hai Opus Clips. Ye tool kisi bhi long YouTube ya podcast video ko automatic chote-chote viral reels me convert karta hai.</textarea>
+
+    <div class="row" style="margin-top:8px;">
+      <div class="half">
+        <label>2) Template</label>
+        <div class="templates" id="templates">
+          <div class="temp active" data-template="dark">Dark</div>
+          <div class="temp" data-template="neon">Neon</div>
+          <div class="temp" data-template="minimal">Minimal</div>
+          <div class="temp" data-template="tech">Tech</div>
+        </div>
+      </div>
+      <div style="width:160px">
+        <label>3) Resolution</label>
+        <select id="resolution"><option value="480x852">480×852 (Short)</option><option value="720x1280">720×1280</option><option value="1080x1920">1080×1920</option></select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px;">
+      <div class="half">
+        <label>4) Voice source</label>
+        <select id="voiceMode"><option value="eleven">ElevenLabs (Pro)</option><option value="browser">Browser TTS (Free)</option></select>
+      </div>
+      <div class="half">
+        <label>ElevenLabs API Key (optional)</label>
+        <input id="elevenKey" placeholder="Paste ElevenLabs API Key if using ElevenLabs" />
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px;">
+      <div class="half">
+        <label>Pexels API Key (B-roll) — optional</label>
+        <input id="pexelsKey" placeholder="Pexels API Key (optional)" />
+      </div>
+      <div class="half">
+        <label>Background music (optional)</label>
+        <input id="musicFile" type="file" accept="audio/*" />
+      </div>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+      <button id="previewBtn">Preview</button>
+      <button id="recordBtn" style="background:#00b894">Start Recording</button>
+      <button id="convertBtn" style="display:none;background:#6c5ce7">Convert to MP4 (ffmpeg)</button>
+      <a id="downloadLink" style="display:none;padding:8px 10px;background:#e84393;border-radius:8px;color:#fff;text-decoration:none">Download</a>
+      <span class="small muted" id="status">Idle</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <canvas id="outCanvas" width="480" height="852"></canvas>
+      <div style="flex:1">
+        <div class="small muted">Live Preview</div>
+        <video id="previewVideo" controls></video>
+        <div class="controls"><label class="small muted">Template:</label><div id="activeTemp" class="small">Dark</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card small muted">Pro note: For best audio capture choose "Share this tab" when browser prompt appears (Chrome recommended). ElevenLabs gives premium natural voices — if you supply key, the code will request TTS audio and use it instead of browser TTS.</div>
+
+<script>
+// Utilities and state
+const templateEls = document.querySelectorAll('.temp');
+let activeTemplate = 'dark';
+const canvas = document.getElementById('outCanvas');
+const ctx = canvas.getContext('2d');
+const previewVideo = document.getElementById('previewVideo');
+const status = document.getElementById('status');
+
+templateEls.forEach(el=> el.addEventListener('click', ()=>{
+  templateEls.forEach(x=>x.classList.remove('active'));
+  el.classList.add('active');
+  activeTemplate = el.dataset.template;
+  document.getElementById('activeTemp').innerText = activeTemplate.charAt(0).toUpperCase()+activeTemplate.slice(1);
+}));
+
+function splitToLines(script){
+  const sentences = script.replace(/
+/g,' ').split(/(?<=\.|\?|!)/).map(s=>s.trim()).filter(Boolean);
+  const lines = [];
+  sentences.forEach(s=>{
+    const words = s.split(' ');
+    for(let i=0;i<words.length;i+=10){ lines.push(words.slice(i,i+10).join(' ')); }
+  });
+  return lines;
+}
+
+function drawFrame(lines,index){
+  // theme styles
+  if(activeTemplate==='dark'){
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle='#ffd400'; ctx.font='24px Arial'; ctx.textAlign='left'; ctx.fillText('NEXTGEN AI',18,42);
+    ctx.fillStyle='#fff'; ctx.font='34px Arial Black'; ctx.textAlign='center'; wrapText(ctx, lines[index]||'', canvas.width/2, canvas.height/2 - 20, canvas.width-70, 36);
+    // subtitle bar
+    ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0, canvas.height-90, canvas.width, 90);
+    ctx.fillStyle='#ffd400'; ctx.font='20px Arial'; ctx.textAlign='center'; ctx.fillText(lines[index]||'', canvas.width/2, canvas.height-34);
+  } else if(activeTemplate==='neon'){
+    ctx.fillStyle='#050018'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    // neon header
+    ctx.shadowColor='rgba(255,212,0,0.85)'; ctx.shadowBlur=18; ctx.fillStyle='#ffd400'; ctx.font='28px Arial Black'; ctx.fillText('NEXTGEN AI',18,48); ctx.shadowBlur=0;
+    ctx.fillStyle='#fff'; ctx.font='36px Arial Black'; ctx.textAlign='center'; wrapText(ctx, lines[index]||'', canvas.width/2, canvas.height/2 -10, canvas.width-60, 40);
+  } else if(activeTemplate==='minimal'){
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle='#000'; ctx.font='26px Arial'; ctx.textAlign='left'; ctx.fillText('NEXTGEN AI',18,46);
+    ctx.fillStyle='#111'; ctx.font='30px Arial Black'; ctx.textAlign='center'; wrapText(ctx, lines[index]||'', canvas.width/2, canvas.height/2 - 10, canvas.width-60, 34);
+  } else if(activeTemplate==='tech'){
+    ctx.fillStyle='#00111a'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle='#00ffd6'; ctx.font='22px Arial'; ctx.fillText('NEXTGEN AI',18,46);
+    ctx.fillStyle='#fff'; ctx.font='34px Arial Black'; ctx.textAlign='center'; wrapText(ctx, lines[index]||'', canvas.width/2, canvas.height/2 -10, canvas.width-60, 36);
+  }
+}
+
+function wrapText(context, text, x, y, maxWidth, lineHeight){
+  const words = text.split(' ');
+  let line = '';
+  let curY=y;
+  for(let n=0;n<words.length;n++){
+    const testLine = line + words[n] + ' ';
+    const metrics = context.measureText(testLine);
+    if(metrics.width > maxWidth && n>0){ context.fillText(line, x, curY); line = words[n]+' '; curY+=lineHeight; }
+    else { line = testLine; }
+  }
+  context.fillText(line, x, curY);
+}
+
+// TTS helpers
+async function fetchElevenTTS(apiKey, text, voice='alloy'){ // returns ArrayBuffer audio (wav/mp3)
+  const url = 'https://api.elevenlabs.io/v1/text-to-speech/'+voice;
+  const res = await fetch(url, {
+    method:'POST', headers:{'Content-Type':'application/json','xi-api-key':apiKey},
+    body: JSON.stringify({text})
+  });
+  if(!res.ok) throw new Error('ElevenLabs TTS failed: '+res.statusText);
+  return await res.arrayBuffer();
+}
+
+// B-roll fetch (Pexels)
+async function fetchPexels(key, query, per=3){
+  if(!key) return []; // skip
+  const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${per}`;
+  const res = await fetch(url, {headers:{Authorization: key}});
+  if(!res.ok) return [];
+  const data = await res.json();
+  return (data.videos||[]).map(v=>v.video_files && v.video_files[0] && v.video_files[0].link).filter(Boolean);
+}
+
+// Build media then record
+document.getElementById('previewBtn').onclick = async ()=>{
+  status.innerText = 'Generating preview...';
+  const script = document.getElementById('script').value.trim();
+  const lines = splitToLines(script);
+  // preview animate 1 loop
+  let idx=0;
+  const fps = 30; let last=0; const interval = 1000/2; // slower stepping
+  function loop(t){ if(t-last>interval){ drawFrame(lines, idx); idx = Math.min(lines.length-1, idx+1); last=t; } if(idx<lines.length-1) requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+  status.innerText = 'Preview running';
+}
+
+// RECORD BUTTON
+document.getElementById('recordBtn').onclick = async ()=>{
+  try{
+    const script = document.getElementById('script').value.trim(); if(!script){ alert('Paste script'); return; }
+    const lines = splitToLines(script);
+    status.innerText = 'Preparing recording...';
+
+    // optional b-roll
+    const pexKey = document.getElementById('pexelsKey').value.trim();
+    const broll = await fetchPexels(pexKey, script.split(' ').slice(0,6).join(' '), 2);
+
+    // get TTS audio (eleven or browser)
+    const voiceMode = document.getElementById('voiceMode').value;
+    let audioBlob = null;
+    if(voiceMode==='eleven'){
+      const k = document.getElementById('elevenKey').value.trim();
+      if(k){
+        status.innerText = 'Fetching high-quality TTS from ElevenLabs...';
+        try{
+          const buf = await fetchElevenTTS(k, script, 'alloy');
+          audioBlob = new Blob([buf], {type:'audio/mpeg'});
+        }catch(e){ console.warn(e); alert('ElevenLabs TTS failed, falling back to browser TTS'); }
+      }
+    }
+
+    // If no external audio, fallback to browser TTS playback and capture page/tab audio
+    // Ask user to share tab for best capture
+    status.innerText = 'Started — please choose SHARE THIS TAB and enable audio in the prompt (Chrome recommended)';
+    let displayStream = null;
+    try{
+      displayStream = await navigator.mediaDevices.getDisplayMedia({video:true, audio:true});
+    }catch(e){
+      // fallback to mic
+      displayStream = await navigator.mediaDevices.getUserMedia({audio:true});
+      alert('Tab-share denied — using microphone fallback (lower quality)');
+    }
+
+    // Prepare audio element that will play TTS+music (so it is captured via displayStream if tab-share used)
+    const pageAudio = new Audio(); pageAudio.crossOrigin='anonymous'; pageAudio.volume=1.0;
+    if(audioBlob){ pageAudio.src = URL.createObjectURL(audioBlob); }
+    else {
+      // generate browser TTS into Audio element using SpeechSynthesisUtterance and capture via speaker (works with share tab)
+      // We'll sequentially speak lines to match subtitle timing
+  ... (truncated)
